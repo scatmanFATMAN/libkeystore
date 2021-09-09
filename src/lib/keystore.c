@@ -15,9 +15,15 @@
 #define KEYSTORE_FILE_PREFIX     "KSSN"
 #define KEYSTORE_FILE_PREFIX_LEN 4
 
+static int initialized = 0;
+
 keystore_t *
 keystore_init() {
     keystore_t *keystore;
+
+    if (initialized++ == 0) {
+        crypt_init();
+    }
 
     keystore = calloc(1, sizeof(*keystore));
 
@@ -26,6 +32,15 @@ keystore_init() {
 
 void
 keystore_free(keystore_t *keystore) {
+    if (--initialized == 0) {
+        crypt_free();
+
+        //protect against people calling keystore_free() too many times
+        if (initialized < 0) {
+            initialized = 0;
+        }
+    }
+
     if (keystore != NULL) {
         keystore_close(keystore);
         free(keystore);
@@ -190,58 +205,15 @@ keystore_save(keystore_t *keystore) {
     return error;
 }
 
-keystore_entry_t *
-keystore_entry_init(keystore_t *keystore, keystore_entry_type_t type, const char *name) {
-    keystore_entry_t *entry;
-
-    if (strlen(name) > KEYSTORE_ENTRY_NAME_MAX) {
-        keystore_error_set(&keystore->error, KEYSTORE_ERROR_LEN, 0, "Name is too long");
-        return NULL;
-    }
-
-    entry = calloc(1, sizeof(*entry));
-    if (entry == NULL) {
-        keystore_error_set(&keystore->error, KEYSTORE_ERROR_MEM, 0, "Out of memory");
-        return NULL;
-    }
-
-    entry->type = type;
-    strcpy(entry->name, name);
-
-    return entry;
-}
-
-void
-keystore_entry_free(keystore_entry_t *entry) {
-    if (entry != NULL) {
-        switch (entry->type) {
-            case KEYSTORE_ENTRY_TYPE_ENTRY:
-                break;
-            case KEYSTORE_ENTRY_TYPE_FOLDER:
-                break;
-            case KEYSTORE_ENTRY_TYPE_INVALID:
-                break;
-        }
-
-        free(entry);
-    }
-}
-
 keystore_error_t
-keystore_add_entry(keystore_t *keystore, keystore_entry_t *entry) {
-    if (entry == NULL) {
-        entry = keystore->entry;
+keystore_add_entry(keystore_t *keystore, keystore_entry_t *parent, keystore_entry_t *entry) {
+    if (parent == NULL) {
+        parent = keystore->entry;
+    }
+
+    if (parent->type != KEYSTORE_ENTRY_TYPE_FOLDER) {
+        return keystore_error_set(&keystore->error, KEYSTORE_ERROR_TYPE, 0, "Parent is not a folder");
     }
 
     return keystore_error_ok(&keystore->error);
-}
-
-keystore_entry_type_t
-keystore_entry_type(keystore_entry_t *entry) {
-    return entry->type;
-}
-
-const char *
-keystore_entry_name(keystore_entry_t *entry) {
-    return entry->name;
 }

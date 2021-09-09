@@ -15,7 +15,19 @@ typedef struct {
 struct keystore_entry_t {
     keystore_entry_type_t type;
     char name[KEYSTORE_ENTRY_NAME_MAX + 1];
+    struct keystore_entry_t *next;
+    void *data;
 };
+
+typedef struct {
+    uint32_t value_len;
+    char *value;
+} keystore_entry_note_t;
+
+typedef struct {
+    uint32_t size;
+    struct keystore_entry_t *head;
+} keystore_entry_folder_t;
 
 struct keystore_t {
     FILE *f;
