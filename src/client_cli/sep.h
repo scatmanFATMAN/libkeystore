@@ -18,3 +18,5 @@ bool sep_parse(sep_t *sep, const char *str);
 
 unsigned int sep_size(sep_t *sep);
 const char * sep_get(sep_t *sep, unsigned int index);
+char * sep_dupe(sep_t *sep, unsigned int index);
+bool sep_equals(sep_t *sep, unsigned int index, const char *str);

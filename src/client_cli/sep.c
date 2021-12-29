@@ -150,3 +150,17 @@ const char *
 sep_get(sep_t *sep, unsigned int index) {
     return sep->args[index];
 }
+
+char *
+sep_dupe(sep_t *sep, unsigned int index) {
+    return strdup(sep->args[index]);
+}
+
+bool
+sep_equals(sep_t *sep, unsigned int index, const char *str) {
+    const char *value;
+
+    value = sep_get(sep, index);
+
+    return value != NULL && strcmp(value, str) == 0;
+}

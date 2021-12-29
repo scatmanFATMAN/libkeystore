@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdio.h>
+#include <openssl/evp.h>
 #include "error_internal.h"
 
 #define CRYPT_BCRYPT_SALT_SIZE    22
@@ -9,6 +11,12 @@
 //128 bit (16 bytes) block and IV 
 #define CRYPT_AES256_BLOCK_SIZE (128 / 8)
 #define CRYPT_AES256_IV_SIZE    (128 / 8)
+
+typedef struct {
+    FILE *f;
+    EVP_CIPHER_CTX *ctx;
+    unsigned char iv[CRYPT_AES256_IV_SIZE];
+} crypt_file_t;
 
 void crypt_init();
 void crypt_free();
@@ -35,7 +43,16 @@ keystore_error_t crypt_bcrypt(keystore_errors_t *errors, const char *salt, const
 keystore_error_t crypt_bcrypt_matches(keystore_errors_t *errors, const char *password, const char *hash);
 
 /**
- * Encrypts a string using AES256 CBC.
+ * Generate a random IV to be used for AES256 CBC encryption.
+ *
+ * @param[out] errors The error object to write errors to.
+ * @param[out] iv The buffer to store the IV in. The buffer must be CRYPT_AES256_IV_SIZE big.
+ * @return KEYSTORE_ERROR_OK on success, otherwise another error.
+ */
+keystore_error_t crypt_aes256_iv(keystore_errors_t *errors, unsigned char *iv);
+
+/**
+ * Encrypts a string using AES256 CBC. A random IV is automatically generated and stored in the iv output parameter.
  *
  * @param[out] errors The error object to write errors to.
  * @param[in] plain The plain text to encrypt.
@@ -59,3 +76,7 @@ keystore_error_t crypt_aes256_encrypt(keystore_errors_t *errors, const char *pla
  * @return KEYSTORE_ERROR_OK on success, otherwise another error.
  */
 keystore_error_t crypt_aes256_decrypt(keystore_errors_t *errors, const unsigned char *encrypted, int encrypted_len, const char *key, const unsigned char *iv, char **plain);
+
+keystore_error_t crypt_aes256_file_encrypt_open(keystore_errors_t *errors, crypt_file_t *file, const char *path, const char *key);
+keystore_error_t crypt_aes256_file_encrypt_write(keystore_errors_t *errors, crypt_file_t *file, const char *plain, int plain_len);
+keystore_error_t crypt_aes256_file_encrypt_close(keystore_errors_t *errors, crypt_file_t *file);

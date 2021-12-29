@@ -1,6 +1,10 @@
 name=keystore
 
-obj=main.o sep.o
+common=../common
+obj=$(common)/os.o \
+	color.o \
+	main.o \
+	sep.o
 
 cc=gcc
 cflags=-I/usr/local/include -Wall -D_GNU_SOURCE -g

@@ -7,6 +7,7 @@
 #include "error_internal.h"
 #include "keystore_internal.h"
 #include "version.h"
+#include "util.h"
 #include "fs.h"
 #include "io.h"
 #include "crypt.h"
@@ -16,6 +17,10 @@
 #define KEYSTORE_FILE_PREFIX_LEN 4
 
 static int initialized = 0;
+
+//forward declarations for things that shouldn't be public
+keystore_error_t keystore_entry_read(keystore_t *keystore, keystore_entry_t *parent, keystore_entry_t **entry);
+keystore_error_t keystore_entry_write(keystore_t *keystore, keystore_entry_t *entry);
 
 keystore_t *
 keystore_init() {
@@ -47,12 +52,18 @@ keystore_free(keystore_t *keystore) {
     }
 }
 
+
+//TODO: only keep ->error?
 static void
 keystore_close_no_reset(keystore_t *keystore) {
     if (keystore != NULL) {
         if (keystore->f != NULL) {
             fclose(keystore->f);
             keystore->f = NULL;
+        }
+
+        if (keystore->root != NULL) {
+            keystore_entry_free(keystore->root);
         }
     }
 }
@@ -63,7 +74,7 @@ keystore_open(keystore_t *keystore, const char *path, const char *password) {
 
     keystore->f = fopen(path, "rb+");
     if (keystore->f == NULL) {
-        error = keystore_error_set(&keystore->error, KEYSTORE_ERROR_IO_OPEN, errno, "%s", strerror(errno));
+        error = keystore_error_set(&keystore->error, KEYSTORE_ERROR_OPEN, errno, "%s", strerror(errno));
         goto done;
     }
 
@@ -74,7 +85,7 @@ keystore_open(keystore_t *keystore, const char *path, const char *password) {
     }
 
     if (strncmp(keystore->header.magic, KEYSTORE_FILE_PREFIX, KEYSTORE_FILE_PREFIX_LEN) != 0) {
-        error = keystore_error_set(&keystore->error, KEYSTORE_ERROR_NOT_KS, 0, "Not a keystore file");
+        error = keystore_error_set(&keystore->error, KEYSTORE_ERROR_INVALID, 0, "Not a keystore file");
         goto done;
     }
 
@@ -89,6 +100,12 @@ keystore_open(keystore_t *keystore, const char *path, const char *password) {
         goto done;
     }
 
+    //read the header: IV
+    error = keystore_read(keystore, keystore->header.iv, sizeof(keystore->header.iv));
+    if (error != KEYSTORE_ERROR_OK) {
+        goto done;
+    }
+
     //read the header: password
     error = keystore_read(keystore, (unsigned char *)keystore->header.password, sizeof(keystore->header.password) - 1);
     if (error != KEYSTORE_ERROR_OK) {
@@ -98,10 +115,16 @@ keystore_open(keystore_t *keystore, const char *path, const char *password) {
     keystore->header.password[sizeof(keystore->header.password) - 1] = '\0';
 
     error = crypt_bcrypt_matches(&keystore->error, password, keystore->header.password);
+    if (error != KEYSTORE_ERROR_OK) {
+        goto done;
+    }
+
+    error = keystore_entry_read(keystore, NULL, &keystore->root);
 
 done:
     if (error != KEYSTORE_ERROR_OK) {
         keystore_close_no_reset(keystore);
+        //keystore_close(keystore);
     }
 
     return error;
@@ -111,9 +134,7 @@ keystore_error_t
 keystore_close(keystore_t *keystore) {
     if (keystore != NULL) {
         keystore_close_no_reset(keystore);
-
-        //make sure all the memory is zero'd out
-        memset(keystore, 0, sizeof(*keystore));
+        util_memzero(keystore, sizeof(*keystore));
     }
 
     return keystore_error_ok(&keystore->error);
@@ -139,6 +160,15 @@ keystore_error(keystore_t *keystore) {
     return keystore == NULL ? NULL : keystore->error.error_str;
 }
 
+keystore_entry_t *
+keystore_root(keystore_t *keystore) {
+    if (keystore_is_open(keystore)) {
+        return keystore->root;
+    }
+
+    return NULL;
+}
+
 bool
 keystore_is_open(keystore_t *keystore) {
     return keystore != NULL && keystore->f != NULL;
@@ -155,7 +185,7 @@ keystore_create(keystore_t *keystore, const char *path, const char *password) {
 
     keystore->f = fopen(path, "wb+");
     if (keystore->f == NULL) {
-        error = keystore_error_set(&keystore->error, KEYSTORE_ERROR_IO_OPEN, errno, "%s", strerror(errno));
+        error = keystore_error_set(&keystore->error, KEYSTORE_ERROR_OPEN, errno, "%s", strerror(errno));
         return error;
     }
 
@@ -169,51 +199,52 @@ keystore_create(keystore_t *keystore, const char *path, const char *password) {
         goto done;
     }
 
-    keystore->entry = keystore_entry_init(keystore, KEYSTORE_ENTRY_TYPE_FOLDER, "root");
+    keystore->root = keystore_entry_init(keystore, KEYSTORE_ENTRY_TYPE_FOLDER, "root");
 
     keystore_save(keystore);
 
 done:
     keystore_close_no_reset(keystore);
+    //keystore_close(keystore);
 
     return error;
 }
+
+//#error TODO: change keystore_write and keystore_read functions to take the keystore_errors struct
 
 keystore_error_t
 keystore_save(keystore_t *keystore) {
     keystore_error_t error;
 
+    rewind(keystore->f);
+
+    //generate an IV used to encrypt the file
+    //everytime the file is saved, we'll generate a new IV
+    error = crypt_aes256_iv(&keystore->error, keystore->header.iv);
+    if (error != KEYSTORE_ERROR_OK) {
+        return error;
+    }
+
     error = keystore_write(keystore, (unsigned char *)keystore->header.magic, 4);
     if (error == KEYSTORE_ERROR_OK) {
         error = keystore_write(keystore, keystore->header.version, 3);
     }
+
+    if (error == KEYSTORE_ERROR_OK) {
+        error = keystore_write(keystore, keystore->header.iv, sizeof(keystore->header.iv));
+    }
+
     if (error == KEYSTORE_ERROR_OK) {
         error = keystore_write(keystore, (unsigned char *)keystore->header.password, sizeof(keystore->header.password) - 1);
         
     }
-    
 
-    
+    //write the root and recursively write all entries
+    error = keystore_entry_write(keystore, keystore->root);
 
-#if 0
-    error = keystore_entry_write(keystore, keystore->entry);
     if (error == KEYSTORE_ERROR_OK ) {
         fflush(keystore->f);
     }
-#endif
 
     return error;
-}
-
-keystore_error_t
-keystore_add_entry(keystore_t *keystore, keystore_entry_t *parent, keystore_entry_t *entry) {
-    if (parent == NULL) {
-        parent = keystore->entry;
-    }
-
-    if (parent->type != KEYSTORE_ENTRY_TYPE_FOLDER) {
-        return keystore_error_set(&keystore->error, KEYSTORE_ERROR_TYPE, 0, "Parent is not a folder");
-    }
-
-    return keystore_error_ok(&keystore->error);
 }

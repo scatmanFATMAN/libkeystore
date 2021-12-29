@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include "error.h"
 #include "entry.h"
+#include "entry_iterator.h"
 
 typedef struct keystore_t keystore_t;
 
@@ -73,6 +74,14 @@ int keystore_version_patch(keystore_t *keystore);
 const char * keystore_error(keystore_t *keystore);
 
 /**
+ * Gets the KeyStore's root entry.
+ *
+ * @param[in] keystore The KeyStore context.
+ * @return The KeyStore's root entry or NULL if the KeyStore is not open.
+ */
+keystore_entry_t * keystore_root(keystore_t *keystore);
+
+/**
  * Determines if the KeyStore context has a KeyStore open.
  *
  * @param[in] keystore The KeyStore context.
@@ -97,14 +106,3 @@ keystore_error_t keystore_create(keystore_t *keystore, const char *path, const c
  * @return KEYSTORE_ERROR_OK on success, otherwise another error.
  */
 keystore_error_t keystore_save(keystore_t *keystore);
-
-/**
- * Adds a KeyStore entry to the KeyStore context. If parent is NULL, the entry will be added to the KeyStore context's
- * root folder, otherwise it'll be added to the entry as a child.
- *
- * @param[in] keystore The KeyStore context.
- * @param[in] parent The KeyStore entry to add the new entry to. If NULL, the entry will be added to the KeyStore context's root folder.
- * @param[in] entry The KeyStore entry to add.
- * @return KEYSTORE_ERROR_OK on success, otherwise another error.
- */
-keystore_error_t keystore_add_entry(keystore_t *keystore, keystore_entry_t *parent, keystore_entry_t *entry);

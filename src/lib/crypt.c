@@ -2,7 +2,6 @@
 #include <stdbool.h>
 #include <string.h>
 #include <errno.h>
-#include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <openssl/err.h>
 #if defined(_WIN32)
@@ -10,6 +9,7 @@
 # include <sys/random.h>
 #endif
 #include "../crypt_blowfish-1.3/ow-crypt.h"
+#include "util.h"
 #include "crypt.h"
 
 void
@@ -103,7 +103,16 @@ crypt_bcrypt_matches(keystore_errors_t *errors, const char *password, const char
     }
 
     if (!matches) {
-       return keystore_error_set(errors, KEYSTORE_ERROR_PW_INVALID, 0, "Password is invalid");
+       return keystore_error_set(errors, KEYSTORE_ERROR_INVALID, 0, "Password is invalid");
+    }
+
+    return keystore_error_ok(errors);
+}
+
+keystore_error_t
+crypt_aes256_iv(keystore_errors_t *errors, unsigned char *iv) {
+    if (!RAND_bytes(iv, CRYPT_AES256_IV_SIZE)) {
+        return keystore_error_set(errors, KEYSTORE_ERROR_MEM, 0, "Out of memory");
     }
 
     return keystore_error_ok(errors);
@@ -135,19 +144,19 @@ crypt_aes256_encrypt(keystore_errors_t *errors, const char *plain, const char *k
     }
 
     if (!EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, (unsigned char *)key, iv)) {
-        error = keystore_error_set(errors, KEYSTORE_ERROR_ENCRYPT_INIT, 0, "Init: %s", ERR_reason_error_string(ERR_get_error()));
+        error = keystore_error_set(errors, KEYSTORE_ERROR_INIT, 0, "Init: %s", ERR_reason_error_string(ERR_get_error()));
         goto done;
     }
 
     if (!EVP_EncryptUpdate(ctx, *encrypted, &len, (unsigned char *)plain, plain_len)) {
-        error = keystore_error_set(errors, KEYSTORE_ERROR_ENCRYPT_WRITE, 0, "Update: %s", ERR_reason_error_string(ERR_get_error()));
+        error = keystore_error_set(errors, KEYSTORE_ERROR_WRITE, 0, "Update: %s", ERR_reason_error_string(ERR_get_error()));
         goto done;
     }
 
     *encrypted_len = len;
 
     if (!EVP_EncryptFinal_ex(ctx, *encrypted + *encrypted_len, &len)) {
-        error = keystore_error_set(errors, KEYSTORE_ERROR_ENCRYPT_WRITE, 0, "Final: %s", ERR_reason_error_string(ERR_get_error()));
+        error = keystore_error_set(errors, KEYSTORE_ERROR_WRITE, 0, "Final: %s", ERR_reason_error_string(ERR_get_error()));
         goto done;
     }
 
@@ -185,19 +194,19 @@ crypt_aes256_decrypt(keystore_errors_t *errors, const unsigned char *encrypted, 
     }
 
     if (!EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, (unsigned char *)key, iv)) {
-        error = keystore_error_set(errors, KEYSTORE_ERROR_DECRYPT_INIT, 0, "Init: %s", ERR_reason_error_string(ERR_get_error()));
+        error = keystore_error_set(errors, KEYSTORE_ERROR_INIT, 0, "Init: %s", ERR_reason_error_string(ERR_get_error()));
         goto done;
     }
 
     if (!EVP_DecryptUpdate(ctx, *(unsigned char **)plain, &len, encrypted, encrypted_len)) {
-        error = keystore_error_set(errors, KEYSTORE_ERROR_DECRYPT_WRITE, 0, "Update: %s", ERR_reason_error_string(ERR_get_error()));
+        error = keystore_error_set(errors, KEYSTORE_ERROR_WRITE, 0, "Update: %s", ERR_reason_error_string(ERR_get_error()));
         goto done;
     }
 
     plain_len = len;
 
     if (!EVP_DecryptFinal_ex(ctx, *(unsigned char **)plain + len, &len)) {
-        error = keystore_error_set(errors, KEYSTORE_ERROR_DECRYPT_WRITE, 0, "Final: %s", ERR_reason_error_string(ERR_get_error()));
+        error = keystore_error_set(errors, KEYSTORE_ERROR_WRITE, 0, "Final: %s", ERR_reason_error_string(ERR_get_error()));
         goto done;
     }
 
@@ -216,3 +225,104 @@ done:
 
     return keystore_error_ok(errors);
 }
+
+keystore_error_t
+crypt_aes256_file_encrypt_open(keystore_errors_t *errors, crypt_file_t *file, const char *path, const char *key) {
+    keystore_error_t error = KEYSTORE_ERROR_OK;
+
+    file->f = fopen(path, "w");
+    if (file->f == NULL) {
+        return keystore_error_set(errors, KEYSTORE_ERROR_OPEN, errno, "Open: %s", strerror(errno));
+    }
+
+    //get random bytes fro the IV
+    if (!RAND_bytes(file->iv, CRYPT_AES256_IV_SIZE)) {
+        error = keystore_error_set(errors, KEYSTORE_ERROR_MEM, 0, "Out of memory");
+        goto done;
+    }
+
+    file->ctx = EVP_CIPHER_CTX_new();
+    if (file->ctx == NULL) {
+        error = keystore_error_set(errors, KEYSTORE_ERROR_MEM, 0, "Out of memory");
+        goto done;
+    }
+
+    if (!EVP_EncryptInit_ex(file->ctx, EVP_aes_256_cbc(), NULL, (unsigned char *)key, file->iv)) {
+        error = keystore_error_set(errors, KEYSTORE_ERROR_INIT, 0, "Init: %s", ERR_reason_error_string(ERR_get_error()));
+        goto done;
+    }
+
+done:
+
+    if (error != KEYSTORE_ERROR_OK) {
+        if (file->f != NULL) {
+            fclose(file->f);
+        }
+
+        if (file->ctx != NULL) {
+            EVP_CIPHER_CTX_free(file->ctx);
+        }
+
+        //zero out memory for the IV
+        util_memzero(file, sizeof(*file));
+
+        return error;
+    }
+
+    return keystore_error_ok(errors);
+}
+
+keystore_error_t
+crypt_aes256_file_encrypt_write(keystore_errors_t *errors, crypt_file_t *file, const char *plain, int plain_len) {
+    unsigned char encrypted[CRYPT_AES256_BLOCK_SIZE];
+    int len, plain_len_chunk;
+    keystore_error_t error;
+
+    //write in aes256 block size chunks so the file gets encrypted and written in a stream like manner so
+    //we don't need to put the entire file into memory
+
+    do {
+        if (plain_len >= CRYPT_AES256_BLOCK_SIZE) {
+            plain_len_chunk = CRYPT_AES256_BLOCK_SIZE;
+        }
+        else {
+            plain_len_chunk = CRYPT_AES256_BLOCK_SIZE - plain_len;
+        }
+        plain_len -= plain_len_chunk;
+
+        if (!EVP_EncryptUpdate(file->ctx, encrypted, &len, (unsigned char *)plain, plain_len_chunk)) {
+            error = keystore_error_set(errors, KEYSTORE_ERROR_WRITE, 0, "Update: %s", ERR_reason_error_string(ERR_get_error()));
+            goto done;
+        }
+
+        if (fwrite(encrypted, sizeof(unsigned char), len, file->f) != len) {
+            return keystore_error_set(errors, KEYSTORE_ERROR_WRITE, errno, "Write: %s", strerror(errno));
+        }
+    }
+    while (plain_len > 0);
+
+done:
+    return error;
+}
+
+keystore_error_t
+crypt_aes256_file_encrypt_close(keystore_errors_t *errors, crypt_file_t *file) {
+    unsigned char encrypted[CRYPT_AES256_BLOCK_SIZE];
+    int len;
+
+    if (!EVP_EncryptFinal_ex(file->ctx, encrypted, &len)) {
+        return keystore_error_set(errors, KEYSTORE_ERROR_WRITE, 0, "Final: %s", ERR_reason_error_string(ERR_get_error()));
+    }
+
+    if (len > 0) {
+        if (fwrite(encrypted, sizeof(unsigned char), len, file->f) != len) {
+            return keystore_error_set(errors, KEYSTORE_ERROR_WRITE, errno, "Write: %s", strerror(errno));
+        }
+    }
+
+    EVP_CIPHER_CTX_free(file->ctx);
+    fclose(file->f);
+
+    return keystore_error_ok(errors);
+}
+
