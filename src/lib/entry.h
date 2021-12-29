@@ -168,6 +168,16 @@ keystore_error_t keystore_entry_get_entry(keystore_t *keystore, keystore_entry_t
 keystore_error_t keystore_entry_get_entries(keystore_t *keystore, keystore_entry_t *parent, keystore_entry_iterator_t **iterator);
 
 /**
+ * Moves a KeyStore entry to a new folder.
+ *
+ * @param[in] keystore The KeyStore context.
+ * @param[in] entry The KeyStore entry to move.
+ * @param[in] dst The KeyStore entry to move to.
+ * @return KEYSTORE_ERROR_OK on success, otherwise another error.
+ */
+keystore_error_t keystore_entry_move_entry(keystore_t *keystore, keystore_entry_t *entry, keystore_entry_t *dst);
+
+/**
  * Deletes a KeyStore entry. By default, this function does not let you delete
  * folders that are not empty. In order to delete folders that are not empty,
  * use the KEYSTORE_ENTRY_DELETE_FLAG_RECURSIVE flag.

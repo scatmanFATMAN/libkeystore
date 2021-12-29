@@ -18,6 +18,16 @@ Library for creating encrypted key oriented databases. The goal is to create a s
 
 <table>
   <tr>
+    <th colspan="2">Dependencies</th>
+  </tr>
+  <tr>
+    <td>OpenSSL</td>
+    <td>Encryption, decryption, and hashing routines</td>
+  </tr>
+</table>
+
+<table>
+  <tr>
     <th colspan="2">TODO</th>
   </tr>
   <tr>
@@ -27,6 +37,10 @@ Library for creating encrypted key oriented databases. The goal is to create a s
   <tr>
     <td>Checksums</td>
     <td>Add checksums to the KeyStore's header to validate data.</td>
+  </tr>
+  <tr>
+    <td>Allow Re-arranging of Entries</td>
+    <td>Let entries be re-arranged inside of a folder..</td>
   </tr>
 </table>
 
@@ -52,5 +66,9 @@ Library for creating encrypted key oriented databases. The goal is to create a s
   <tr>
     <td>Global Configuration File</td>
     <td>Allow users to specify a configuration file which can be read which can have the user's default KeyStore and password. On Linux, it'll probably live in $HOME/.libkeystore or someplace similar.</td>
+  </tr>
+  <tr>
+    <td>Allow Re-arranging of Entries</td>
+    <td>Let entries be re-arranged inside of a folder..</td>
   </tr>
 </table>

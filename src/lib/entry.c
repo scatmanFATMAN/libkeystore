@@ -298,6 +298,7 @@ keystore_entry_add_entry(keystore_t *keystore, keystore_entry_t *parent, keystor
 
     ++folder->size;
     parent->modified = time(NULL);
+    entry->modified = time(NULL);
 
     return keystore_error_ok(&keystore->error);
 }
@@ -348,39 +349,29 @@ keystore_entry_get_entries(keystore_t *keystore, keystore_entry_t *parent, keyst
 }
 
 keystore_error_t
-keystore_entry_delete_entry(keystore_t *keystore, keystore_entry_t *entry, int flags) {
-    keystore_error_t error = KEYSTORE_ERROR_OK;
+keystore_entry_move_entry(keystore_t *keystore, keystore_entry_t *entry, keystore_entry_t *dst) {
+    keystore_error_t error;
     keystore_entry_folder_t *folder;
-    keystore_entry_t *prev;
+    keystore_entry_t *parent, *prev;
 
     if (entry->parent == NULL) {
-        return keystore_error_set(&keystore->error, KEYSTORE_ERROR_INVALID, 0, "Cannot delete root");
+        return keystore_error_set(&keystore->error, KEYSTORE_ERROR_INVALID, 0, "Cannot move the root folder");
     }
-
     if (entry->parent->type != KEYSTORE_ENTRY_TYPE_FOLDER) {
         return keystore_error_set(&keystore->error, KEYSTORE_ERROR_TYPE, 0, "Parent is not a folder");
     }
-
-    if (entry->type == KEYSTORE_ENTRY_TYPE_FOLDER) {
-        folder = (keystore_entry_folder_t *)entry->data;
-        if (folder->size > 0 && !(flags & KEYSTORE_ENTRY_DELETE_FLAG_RECURSIVE)) {
-            return keystore_error_set(&keystore->error, KEYSTORE_ERROR_INVALID, 0, "Cannot delete non-empty folder");
-        }
+    if (keystore_entry_type(dst) != KEYSTORE_ENTRY_TYPE_FOLDER) {
+        return keystore_error_set(&keystore->error, KEYSTORE_ERROR_TYPE, 0, "Destination entry is not a folder");
     }
 
-#if 0
-    switch (entry->type) {
-        case KEYSTORE_ENTRY_TYPE_NOTE:
-            break;
-        case KEYSTORE_ENTRY_TYPE_FOLDER:
-            break;
-        default:
-            error = keystore_error_set(&keystore->error, KEYSTORE_ERROR_TYPE, 0, "Invalid type");
-            break;
-    }
-#endif
+    parent = entry->parent;
+    folder = (keystore_entry_folder_t *)parent->data;
 
-    folder = (keystore_entry_folder_t *)entry->parent->data;
+    error = keystore_entry_add_entry(keystore, dst, entry);
+    if (error != KEYSTORE_ERROR_OK) {
+        return error;
+    }
+
     if (folder->head == entry) {
         folder->head = entry->next;
     }
@@ -397,11 +388,57 @@ keystore_entry_delete_entry(keystore_t *keystore, keystore_entry_t *entry, int f
         }
     }
 
+    parent->modified = time(NULL);
+    --folder->size;
+
+    return keystore_error_ok(&keystore->error);
+}
+
+keystore_error_t
+keystore_entry_delete_entry(keystore_t *keystore, keystore_entry_t *entry, int flags) {
+    keystore_entry_folder_t *folder;
+    keystore_entry_t *parent, *prev;
+
+    if (entry->parent == NULL) {
+        return keystore_error_set(&keystore->error, KEYSTORE_ERROR_INVALID, 0, "Cannot delete the root folder");
+    }
+
+    if (entry->parent->type != KEYSTORE_ENTRY_TYPE_FOLDER) {
+        return keystore_error_set(&keystore->error, KEYSTORE_ERROR_TYPE, 0, "Parent is not a folder");
+    }
+
+    if (entry->type == KEYSTORE_ENTRY_TYPE_FOLDER) {
+        folder = (keystore_entry_folder_t *)entry->data;
+        if (folder->size > 0 && !(flags & KEYSTORE_ENTRY_DELETE_FLAG_RECURSIVE)) {
+            return keystore_error_set(&keystore->error, KEYSTORE_ERROR_INVALID, 0, "Cannot delete non-empty folder");
+        }
+    }
+
+    parent = entry->parent;
+    folder = (keystore_entry_folder_t *)parent->data;
+
+    if (folder->head == entry) {
+        folder->head = entry->next;
+    }
+    else {
+        prev = folder->head;
+        while (prev->next != entry) {
+            prev = prev->next;
+        }
+
+        prev->next = entry->next;
+
+        if (folder->tail == entry) {
+            folder->tail = prev;
+        }
+    }
+
+    parent->modified = time(NULL);
     --folder->size;
 
     keystore_entry_free(entry);
 
-    return error;
+    return keystore_error_ok(&keystore->error);
 }
 
 //keystore_entry_read will free memory if this fails

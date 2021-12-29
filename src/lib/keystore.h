@@ -5,6 +5,8 @@
 #include "entry.h"
 #include "entry_iterator.h"
 
+#define KEYSTORE_PASSWORD_MAX 255
+
 typedef struct keystore_t keystore_t;
 
 /**
